@@ -167,7 +167,8 @@ function applyConfig() {
   const profile = state.config.profile === "forum" ? "forum" : "business";
   el("display").dataset.profile = profile;
   el("display").classList.toggle("patterns-on", state.config.patternsEnabled);
-  el("brand-logo").src = `public/assets/logos/logo-${profile}.svg`;
+  const headerLogo = profile === "forum" ? "logo-full.svg" : "logo-business.svg";
+  el("brand-logo").src = `public/assets/logos/${headerLogo}`;
   el("screen-title").textContent = localized(state.config, "title") || "ии лекторий";
   el("schedule-select").innerHTML = Object.entries(state.config.schedules).map(([id, schedule]) => `<option value="${escapeHtml(id)}">${escapeHtml(localized(schedule, "name") || id)}</option>`).join("");
   el("schedule-select").value = state.config.schedule;
