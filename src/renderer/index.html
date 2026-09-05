@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'">
+  <base href="../../">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#111111">
+  <title>Расписание — Билайн</title>
+  <link rel="icon" href="public/assets/logos/logo-ball.svg" type="image/svg+xml">
+  <link rel="icon" href="public/assets/logos/logo-ball.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="src/renderer/styles.css">
+</head>
+<body>
+  <main id="display" class="display patterns-on" aria-live="polite">
+    <img class="pattern" src="public/assets/patterns/beeline-rings.svg" alt="" aria-hidden="true">
+
+    <header class="header">
+      <img id="brand-logo" class="brand-logo" alt="Билайн">
+      <h1 id="screen-title">ии лекторий</h1>
+    </header>
+
+    <section class="schedule" aria-label="Расписание событий">
+      <nav id="date-nav" class="date-nav" aria-label="Выбор даты"></nav>
+      <div id="schedule-list" class="schedule-list"></div>
+      <div id="empty-state" class="empty-state" hidden>На выбранную дату событий нет</div>
+    </section>
+
+    <footer class="footer">
+      <div class="languages" aria-label="Язык интерфейса">
+        <button data-language="en" type="button">ENG</button>
+        <button data-language="ru" type="button" class="active">РУС</button>
+      </div>
+      <img class="footer-mark" src="public/assets/logos/logo-ball.svg" alt="">
+    </footer>
+
+    <aside id="dev-panel" class="dev-panel" hidden>
+      <div class="dev-heading"><strong>Режим разработчика</strong><button id="dev-close" type="button">×</button></div>
+      <label><span>Расписание</span><select id="schedule-select"></select></label>
+      <label><span>Время</span><select id="clock-mode"><option value="system">Системное</option><option value="fixed">Фиксированное</option></select></label>
+      <label><span>Дата и время</span><input id="fixed-time" type="datetime-local"></label>
+      <label class="check"><input id="patterns-toggle" type="checkbox"><span>Паттерны</span></label>
+      <label class="check"><input id="details-toggle" type="checkbox"><span>Детальные карточки</span></label>
+      <label class="file"><span>Загрузить другой CSV</span><input id="csv-file" type="file" accept=".csv,text/csv"></label>
+      <p id="diagnostics"></p>
+      <small>Открыть/закрыть: Shift+D</small>
+    </aside>
+
+    <section id="fatal-error" class="fatal-error" hidden></section>
+  </main>
+  <script type="module" src="src/renderer/app.js"></script>
+</body>
+</html>
