@@ -1,8 +1,12 @@
 import { parseCsv, validateAndNormalize } from "./csv.js";
 
-const state = { config: null, catalog: null, events: [], selectedDate: null, timer: null, language: "ru", expandedEventId: null };
+const state = { config: null, catalog: null, events: [], selectedDate: null, timer: null, language: "ru", expandedEventId: null, eventPage: 0, listTransitioning: false, swipeStartY: null, suppressClick: false };
 const el = id => document.getElementById(id);
 const devToolsEnabled = ["127.0.0.1", "localhost"].includes(location.hostname) || new URLSearchParams(location.search).get("dev") === "1";
+const PAGE_SIZE = 7;
+const EXPANDED_PAGE_SIZE = 5;
+const wait = milliseconds => new Promise(resolve => window.setTimeout(resolve, milliseconds));
+const paint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
 async function boot() {
   try {
@@ -20,6 +24,7 @@ async function boot() {
     const dates = availableDates();
     if (!dates.length) throw new Error("В расписании нет видимых событий");
     state.selectedDate = chooseInitialDate(dates);
+    state.eventPage = initialEventPage();
     bindUi();
     applyConfig();
     render();
@@ -106,15 +111,82 @@ function renderDates() {
     const event = state.events.find(item => item.date === date);
     return `<button type="button" data-date="${date}" class="${date === state.selectedDate ? "active" : ""}">${escapeHtml(formatDate(date, localized(event, "date_label")))}</button>`;
   }).join("");
-  el("date-nav").querySelectorAll("button").forEach(button => button.addEventListener("click", () => { state.selectedDate = button.dataset.date; state.expandedEventId = null; render(); }));
+  el("date-nav").querySelectorAll("button").forEach(button => {
+    bindPressFeedback(button);
+    button.addEventListener("click", () => {
+      if (button.dataset.date === state.selectedDate) return;
+      transitionList(() => {
+        state.selectedDate = button.dataset.date;
+        state.expandedEventId = null;
+        state.eventPage = initialEventPage();
+        renderDates();
+      });
+    });
+  });
   el("date-nav").querySelector(".active")?.scrollIntoView({ inline: "center", block: "nearest" });
 }
 
-function renderEvents() {
-  const events = state.events.filter(event => event.date === state.selectedDate);
+function eventsForSelectedDate() { return state.events.filter(event => event.date === state.selectedDate); }
+
+function initialEventPage() {
+  const events = eventsForSelectedDate();
+  const activeIndex = events.findIndex(event => ["now", "upcoming"].includes(eventStatus(event).name));
+  const targetIndex = activeIndex >= 0 ? activeIndex : Math.max(0, events.length - 1);
+  return Math.floor(targetIndex / PAGE_SIZE);
+}
+
+function visibleEventWindow(events) {
+  if (!state.expandedEventId) {
+    const pageCount = Math.max(1, Math.ceil(events.length / PAGE_SIZE));
+    state.eventPage = Math.min(state.eventPage, pageCount - 1);
+    const start = state.eventPage * PAGE_SIZE;
+    return { events: events.slice(start, start + PAGE_SIZE), start, pageCount };
+  }
+  const focusIndex = Math.max(0, events.findIndex(event => event.event_id === state.expandedEventId));
+  const start = Math.max(0, Math.min(focusIndex - 1, events.length - EXPANDED_PAGE_SIZE));
+  return { events: events.slice(start, start + EXPANDED_PAGE_SIZE), start, pageCount: Math.max(1, Math.ceil(events.length / PAGE_SIZE)) };
+}
+
+function bindEventCards(list) {
+  list.querySelectorAll(".interactive").forEach(card => {
+    bindPressFeedback(card);
+    const toggle = () => {
+      if (state.suppressClick) return;
+      transitionList(() => {
+        state.expandedEventId = state.expandedEventId === card.dataset.id ? null : card.dataset.id;
+      });
+    };
+    card.addEventListener("click", toggle);
+    card.addEventListener("keydown", event => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); toggle(); } });
+  });
+}
+
+function bindPressFeedback(node) {
+  let pressedAt = 0;
+  let releaseTimer = null;
+  const release = () => {
+    window.clearTimeout(releaseTimer);
+    const remaining = Math.max(0, 170 - (performance.now() - pressedAt));
+    releaseTimer = window.setTimeout(() => node.classList.remove("is-pressed"), remaining);
+  };
+  node.addEventListener("pointerdown", () => {
+    pressedAt = performance.now();
+    node.classList.add("is-pressed");
+  });
+  node.addEventListener("pointerup", release);
+  node.addEventListener("pointercancel", release);
+  node.addEventListener("pointerleave", release);
+}
+
+function renderEvents({ entering = false } = {}) {
+  const allEvents = eventsForSelectedDate();
+  const windowed = visibleEventWindow(allEvents);
+  const events = windowed.events;
   const list = el("schedule-list");
-  const previousScrollTop = list.scrollTop;
-  el("empty-state").hidden = events.length > 0;
+  list.dataset.page = String(state.eventPage + 1);
+  list.dataset.pages = String(windowed.pageCount);
+  list.setAttribute("aria-label", windowed.pageCount > 1 ? `Страница ${state.eventPage + 1} из ${windowed.pageCount}` : "События выбранного дня");
+  el("empty-state").hidden = allEvents.length > 0;
   list.innerHTML = events.map(event => {
     const status = eventStatus(event);
     const interactive = state.config.detailsEnabled && event.detailEnabled !== false && Boolean(event.description || event.description_en || event.photo);
@@ -133,16 +205,40 @@ function renderEvents() {
       ${status.name === "now" ? `<div class="now-badge">${nowLabel()} <i></i></div>` : ""}
     </article>`;
   }).join("");
-  list.querySelectorAll(".interactive").forEach(card => {
-    const toggle = () => { state.expandedEventId = state.expandedEventId === card.dataset.id ? null : card.dataset.id; renderEvents(); };
-    card.addEventListener("click", toggle);
-    card.addEventListener("keydown", event => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); toggle(); } });
+  bindEventCards(list);
+  const cards = [...list.querySelectorAll(".event-card")];
+  cards.forEach((card, index) => {
+    card.style.transitionDelay = `${Math.min(index, 6) * 38 + (index * 37 % 43)}ms`;
+    if (entering) card.classList.add("is-hidden", "is-preparing");
   });
-  requestAnimationFrame(() => {
-    list.scrollTop = previousScrollTop;
-    list.querySelector(".expanded")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    if (!state.expandedEventId && previousScrollTop === 0) list.querySelector(".now")?.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+async function transitionList(update) {
+  if (state.listTransitioning) return;
+  state.listTransitioning = true;
+  const list = el("schedule-list");
+  const oldCards = [...list.querySelectorAll(".event-card")];
+  oldCards.forEach((card, index) => {
+    card.style.transitionDelay = `${Math.min(index, 6) * 16 + (index * 37 % 43)}ms`;
+    card.classList.add("is-hidden");
   });
+  await wait(360);
+  update();
+  renderEvents({ entering: true });
+  await paint();
+  const newCards = [...list.querySelectorAll(".event-card")];
+  newCards.forEach(card => card.classList.remove("is-preparing", "is-hidden"));
+  await wait(620);
+  newCards.forEach(card => { card.style.transitionDelay = ""; });
+  state.listTransitioning = false;
+}
+
+function changeEventPage(delta) {
+  if (state.expandedEventId || state.listTransitioning) return;
+  const pageCount = Math.ceil(eventsForSelectedDate().length / PAGE_SIZE);
+  const next = Math.max(0, Math.min(pageCount - 1, state.eventPage + delta));
+  if (next === state.eventPage) return;
+  transitionList(() => { state.eventPage = next; });
 }
 
 function renderStatuses() {
@@ -156,6 +252,12 @@ function renderStatuses() {
     if (status.name === "now" && !badge) card.insertAdjacentHTML("beforeend", `<div class="now-badge">${nowLabel()} <i></i></div>`);
     if (status.name !== "now") badge?.remove();
   });
+  if (!state.expandedEventId && !state.listTransitioning) {
+    const events = eventsForSelectedDate();
+    const nowIndex = events.findIndex(event => eventStatus(event).name === "now");
+    const nowPage = nowIndex >= 0 ? Math.floor(nowIndex / PAGE_SIZE) : state.eventPage;
+    if (nowPage !== state.eventPage) transitionList(() => { state.eventPage = nowPage; });
+  }
 }
 
 function photoUrl(value) {
@@ -183,7 +285,9 @@ function applyConfig() {
 function bindUi() {
   document.addEventListener("keydown", event => {
     if (devToolsEnabled && event.shiftKey && event.key.toLowerCase() === "d") el("dev-panel").hidden = !el("dev-panel").hidden;
-    if (event.key === "Escape" && state.expandedEventId) { state.expandedEventId = null; renderEvents(); }
+    if (event.key === "Escape" && state.expandedEventId) transitionList(() => { state.expandedEventId = null; });
+    if (event.key === "PageDown") { event.preventDefault(); changeEventPage(1); }
+    if (event.key === "PageUp") { event.preventDefault(); changeEventPage(-1); }
   });
   el("dev-close").onclick = () => { el("dev-panel").hidden = true; };
   el("schedule-select").onchange = event => { const params = new URLSearchParams(location.search); params.set("schedule", event.target.value); params.delete("profile"); location.search = params.toString(); };
@@ -192,10 +296,38 @@ function bindUi() {
   el("patterns-toggle").onchange = event => { state.config.patternsEnabled = event.target.checked; applyConfig(); };
   el("details-toggle").onchange = event => { state.config.detailsEnabled = event.target.checked; renderEvents(); updateDiagnostics(); };
   el("csv-file").onchange = async event => {
-    try { state.events = validateAndNormalize(parseCsv(await event.target.files[0].text())); state.selectedDate = chooseInitialDate(availableDates()); render(); updateDiagnostics("CSV загружен без ошибок"); }
+    try { state.events = validateAndNormalize(parseCsv(await event.target.files[0].text())); state.selectedDate = chooseInitialDate(availableDates()); state.expandedEventId = null; state.eventPage = initialEventPage(); render(); updateDiagnostics("CSV загружен без ошибок"); }
     catch (error) { updateDiagnostics(error.message, true); }
   };
-  document.querySelectorAll("[data-language]").forEach(button => button.onclick = () => { state.language = button.dataset.language; updateLanguage(); render(); });
+  document.querySelectorAll("[data-language]").forEach(button => {
+    bindPressFeedback(button);
+    button.onclick = () => {
+      if (button.dataset.language === state.language) return;
+      transitionList(() => {
+        state.language = button.dataset.language;
+        updateLanguage();
+        renderDates();
+      });
+    };
+  });
+  const list = el("schedule-list");
+  list.addEventListener("pointerdown", event => { state.swipeStartY = event.clientY; });
+  list.addEventListener("pointercancel", () => { state.swipeStartY = null; });
+  list.addEventListener("pointerup", event => {
+    if (state.swipeStartY === null) return;
+    const distance = event.clientY - state.swipeStartY;
+    state.swipeStartY = null;
+    if (Math.abs(distance) >= 48) {
+      state.suppressClick = true;
+      changeEventPage(distance < 0 ? 1 : -1);
+      window.setTimeout(() => { state.suppressClick = false; }, 350);
+    }
+  });
+  list.addEventListener("wheel", event => {
+    if (Math.abs(event.deltaY) < 18) return;
+    event.preventDefault();
+    changeEventPage(event.deltaY > 0 ? 1 : -1);
+  }, { passive: false });
 }
 
 function updateLanguage() {

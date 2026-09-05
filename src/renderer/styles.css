@@ -7,13 +7,13 @@
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 body { display: grid; place-items: center; background: #242424; }
 button, input, select { font: inherit; }
-button { cursor: pointer; }
+button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 
 .display { position: relative; width: min(100vw, calc(100vh * .5625)); height: min(100vh, calc(100vw * 1.7777778)); overflow: hidden; background: #f1f0ec; container-type: size; isolation: isolate; }
 .header { position: relative; z-index: 3; height: 8.177%; display: flex; align-items: center; justify-content: space-between; padding: 0 11.608%; border-radius: 0 0 2.5cqh 2.5cqh; background: #ffc800; }
 .brand-logo { flex: 0 0 33.636cqw; width: 33.636cqw; height: 2.76cqh; object-fit: contain; object-position: left center; }
 [data-profile="forum"] .header { padding-inline: 17.176%; }
-[data-profile="forum"] .brand-logo { flex-basis: 22.5cqw; width: 22.5cqw; }
+[data-profile="forum"] .brand-logo { flex-basis: 22.5cqw; width: 22.5cqw; height: 3.125cqh; }
 .header h1 { margin: 0; font-size: 3.333cqh; line-height: .828; font-weight: 700; letter-spacing: 0; text-transform: lowercase; }
 
 .schedule { position: relative; z-index: 3; height: 86.51%; padding-top: 3.333cqh; }
@@ -21,15 +21,17 @@ button { cursor: pointer; }
 .date-nav::-webkit-scrollbar { display: none; }
 .date-nav button { flex: 0 0 auto; min-width: 21.3cqw; border: 0; background: transparent; padding: 0; color: #5b584f; font-size: 2.5cqh; line-height: 1.18; font-weight: 400; white-space: nowrap; scroll-snap-align: center; opacity: .66; }
 .date-nav button.active { color: #111; font-weight: 500; opacity: 1; }
+.date-nav button.is-pressed { opacity: .35; }
 
-.schedule-list { height: calc(100% - 6.302cqh); overflow-y: auto; padding: 2.813cqh 3.704cqw 10cqh; scrollbar-width: none; scroll-behavior: smooth; }
-.schedule-list::-webkit-scrollbar { display: none; }
-.event-card { position: relative; min-height: 9.792cqh; margin-bottom: -.573cqh; overflow: hidden; border: 0; border-radius: .938cqh; background: #fff; box-shadow: inset 0 0 0 .052cqh rgba(211,208,201,.8), 0 -.208cqh .589cqh rgba(17,17,17,.15); transition: opacity .2s, transform .2s, background .2s; }
+.schedule-list { height: calc(100% - 6.302cqh); overflow: hidden; padding: 2.813cqh 3.704cqw 10cqh; touch-action: none; overscroll-behavior: none; }
+.event-card { position: relative; min-height: 9.792cqh; margin-bottom: -.573cqh; overflow: hidden; border: 0; border-radius: .938cqh; background: #fff; box-shadow: inset 0 0 0 .052cqh rgba(211,208,201,.8), 0 -.208cqh .589cqh rgba(17,17,17,.15); opacity: 1; transition: opacity 330ms ease, transform 180ms ease, background 200ms ease; }
+.event-card.is-preparing { transition: none; }
+.event-card.is-hidden { opacity: 0; pointer-events: none; }
 .event-card:nth-child(even) { background: #fff9e5; }
 .event-card.past { opacity: .62; }
 .event-card.now { min-height: 10.625cqh; margin-bottom: .625cqh; background: #ffc800; opacity: 1; }
 .event-card.expanded { min-height: 22.031cqh; margin-bottom: -.573cqh; }
-.event-card.interactive:active { transform: scale(.99); }
+.event-card.interactive.is-pressed { transform: scale(.99); }
 .event-card.interactive { cursor: pointer; }
 .event-body { height: 7.188cqh; display: grid; grid-template-columns: 24.815cqw .185cqw 1fr; column-gap: 2.963cqw; align-items: center; margin: 1.302cqh 3.333cqw 0 2.315cqw; padding: 0; }
 .event-left { min-width: 0; }
@@ -57,8 +59,10 @@ button { cursor: pointer; }
 
 .footer { position: absolute; z-index: 5; left: 0; right: 0; bottom: 0; height: 5.313%; display: flex; align-items: center; justify-content: center; gap: 11.1cqw; padding: 0 3cqw; border-radius: 2.5cqh 2.5cqh 0 0; background: #ffc800; }
 .languages { display: flex; gap: 2.2cqw; }
-.languages button { width: 9cqw; height: 2.2cqh; border: 0; border-radius: 1.2cqh; background: #f1f0ec; font-size: .86cqh; font-weight: 700; box-shadow: 0 .08cqh .22cqh rgba(17,17,17,.15); }
-.languages button.active { background: #fff; outline: .12cqh solid #111; }
+.languages button { width: 9.074cqw; height: 2.188cqh; border: 0; border-radius: .938cqh; background: #ffc800; color: #111; font-size: .833cqh; line-height: 1.25; font-weight: 700; letter-spacing: .037cqw; box-shadow: none; }
+.languages button + button { width: 8.889cqw; }
+.languages button.active { background: #fff; outline: 0; }
+.languages button.is-pressed { opacity: .55; }
 .footer-mark { width: 8.5cqw; height: 3.6cqh; object-fit: contain; }
 [data-profile="business"] .footer-mark { display: none; }
 
