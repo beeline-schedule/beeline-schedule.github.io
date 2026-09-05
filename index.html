@@ -8,6 +8,7 @@
   <meta name="theme-color" content="#111111">
   <title>Расписание — Билайн</title>
   <link rel="icon" href="public/assets/logos/logo-ball.svg" type="image/svg+xml">
+  <link rel="preload" href="public/assets/logos/logo-eng-row.svg" as="image" type="image/svg+xml">
   <link rel="stylesheet" href="src/renderer/styles.css">
 </head>
 <body>
@@ -21,7 +22,7 @@
 
     <section class="schedule" aria-label="Расписание событий">
       <nav id="date-nav" class="date-nav" aria-label="Выбор даты"></nav>
-      <div id="schedule-list" class="schedule-list"></div>
+      <div id="schedule-list" class="schedule-list"><div class="event-viewport"><div id="event-stack" class="event-stack"></div></div></div>
       <div id="empty-state" class="empty-state" hidden>На выбранную дату событий нет</div>
     </section>
 

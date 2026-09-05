@@ -7,7 +7,7 @@
       "profile": "business",
       "timezone": "Europe/Moscow",
       "title": "ии лекторий",
-      "title_en": "AI Lecture Hall",
+      "title_en": "AI lecture hall",
       "patternsEnabled": true,
       "file": "content/generated/business.csv"
     },
@@ -17,7 +17,7 @@
       "profile": "forum",
       "timezone": "Asia/Yekaterinburg",
       "title": "ии лекторий",
-      "title_en": "AI Lecture Hall",
+      "title_en": "AI lecture hall",
       "patternsEnabled": true,
       "file": "content/generated/youth.csv"
     }

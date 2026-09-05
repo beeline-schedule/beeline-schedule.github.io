@@ -1,10 +1,10 @@
 import { parseCsv, validateAndNormalize } from "./csv.js";
 
-const state = { config: null, catalog: null, events: [], selectedDate: null, timer: null, language: "ru", expandedEventId: null, eventPage: 0, listTransitioning: false, swipeStartY: null, suppressClick: false };
+const state = { config: null, catalog: null, events: [], selectedDate: null, timer: null, progressFrame: null, dateScrollFrame: null, language: "ru", pendingLanguage: null, expandedEventId: null, eventPage: 0, listTransitioning: false, swipeStartY: null, suppressClick: false };
 const el = id => document.getElementById(id);
 const devToolsEnabled = ["127.0.0.1", "localhost"].includes(location.hostname) || new URLSearchParams(location.search).get("dev") === "1";
 const PAGE_SIZE = 7;
-const EXPANDED_PAGE_SIZE = 5;
+const DETAIL_WINDOW_SIZE = 6;
 const wait = milliseconds => new Promise(resolve => window.setTimeout(resolve, milliseconds));
 const paint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
@@ -29,6 +29,7 @@ async function boot() {
     applyConfig();
     render();
     state.timer = window.setInterval(renderStatuses, 1000);
+    animateLiveProgress();
   } catch (error) { showFatal(error); }
 }
 
@@ -101,17 +102,27 @@ function localized(source, key) {
   return String(source?.[key] || "");
 }
 
+function localizedDetail(event) {
+  return localized(event, "speaker_bio") || localized(event, "description");
+}
+
 function nowLabel() { return state.language === "en" ? "NOW" : "СЕЙЧАС"; }
 
 function render() { renderDates(); renderEvents(); renderStatuses(); }
 
-function renderDates() {
+function renderDates({ smooth = false } = {}) {
   const dates = availableDates();
-  el("date-nav").innerHTML = dates.map(date => {
-    const event = state.events.find(item => item.date === date);
-    return `<button type="button" data-date="${date}" class="${date === state.selectedDate ? "active" : ""}">${escapeHtml(formatDate(date, localized(event, "date_label")))}</button>`;
-  }).join("");
-  el("date-nav").querySelectorAll("button").forEach(button => {
+  const nav = el("date-nav");
+  const existingDates = [...nav.querySelectorAll("button")].map(button => button.dataset.date);
+  if (existingDates.join("|") !== dates.join("|")) {
+    nav.innerHTML = dates.map(date => `<button type="button" data-date="${date}"></button>`).join("");
+  }
+  nav.querySelectorAll("button").forEach(button => {
+    const event = state.events.find(item => item.date === button.dataset.date);
+    button.textContent = formatDate(button.dataset.date, localized(event, "date_label"));
+    button.classList.toggle("active", button.dataset.date === state.selectedDate);
+    if (button.dataset.bound === "true") return;
+    button.dataset.bound = "true";
     bindPressFeedback(button);
     button.addEventListener("click", () => {
       if (button.dataset.date === state.selectedDate) return;
@@ -119,11 +130,43 @@ function renderDates() {
         state.selectedDate = button.dataset.date;
         state.expandedEventId = null;
         state.eventPage = initialEventPage();
-        renderDates();
+        renderDates({ smooth: true });
       });
     });
   });
-  el("date-nav").querySelector(".active")?.scrollIntoView({ inline: "center", block: "nearest" });
+  centerActiveDate(smooth);
+}
+
+function centerActiveDate(smooth = false) {
+  const nav = el("date-nav");
+  const buttons = [...nav.querySelectorAll("button")];
+  const gap = Number.parseFloat(getComputedStyle(nav).columnGap) || 0;
+  const contentWidth = buttons.reduce((total, button) => total + button.offsetWidth, 0) + Math.max(0, buttons.length - 1) * gap;
+  const allFit = contentWidth <= nav.clientWidth;
+  nav.classList.toggle("all-fit", allFit);
+  window.cancelAnimationFrame(state.dateScrollFrame);
+  if (allFit) {
+    nav.scrollLeft = 0;
+    return;
+  }
+  const active = nav.querySelector(".active");
+  if (!active) return;
+  const target = active.offsetLeft + active.offsetWidth / 2 - nav.clientWidth / 2;
+  if (!smooth) {
+    nav.scrollLeft = target;
+    return;
+  }
+  const start = nav.scrollLeft;
+  const distance = target - start;
+  const startedAt = performance.now();
+  const duration = 900;
+  const step = now => {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const eased = progress < .5 ? 4 * progress ** 3 : 1 - ((-2 * progress + 2) ** 3) / 2;
+    nav.scrollLeft = start + distance * eased;
+    if (progress < 1) state.dateScrollFrame = requestAnimationFrame(step);
+  };
+  state.dateScrollFrame = requestAnimationFrame(step);
 }
 
 function eventsForSelectedDate() { return state.events.filter(event => event.date === state.selectedDate); }
@@ -132,19 +175,15 @@ function initialEventPage() {
   const events = eventsForSelectedDate();
   const activeIndex = events.findIndex(event => ["now", "upcoming"].includes(eventStatus(event).name));
   const targetIndex = activeIndex >= 0 ? activeIndex : Math.max(0, events.length - 1);
-  return Math.floor(targetIndex / PAGE_SIZE);
+  return Math.min(targetIndex, Math.max(0, events.length - PAGE_SIZE));
 }
 
 function visibleEventWindow(events) {
-  if (!state.expandedEventId) {
-    const pageCount = Math.max(1, Math.ceil(events.length / PAGE_SIZE));
-    state.eventPage = Math.min(state.eventPage, pageCount - 1);
-    const start = state.eventPage * PAGE_SIZE;
-    return { events: events.slice(start, start + PAGE_SIZE), start, pageCount };
-  }
-  const focusIndex = Math.max(0, events.findIndex(event => event.event_id === state.expandedEventId));
-  const start = Math.max(0, Math.min(focusIndex - 1, events.length - EXPANDED_PAGE_SIZE));
-  return { events: events.slice(start, start + EXPANDED_PAGE_SIZE), start, pageCount: Math.max(1, Math.ceil(events.length / PAGE_SIZE)) };
+  const windowSize = state.expandedEventId ? DETAIL_WINDOW_SIZE : PAGE_SIZE;
+  const maxOffset = state.expandedEventId ? Math.max(0, events.length - 1) : Math.max(0, events.length - windowSize);
+  state.eventPage = Math.max(0, Math.min(state.eventPage, maxOffset));
+  const start = state.eventPage;
+  return { events: events.slice(start, start + windowSize), start, maxOffset };
 }
 
 function bindEventCards(list) {
@@ -152,13 +191,40 @@ function bindEventCards(list) {
     bindPressFeedback(card);
     const toggle = () => {
       if (state.suppressClick) return;
-      transitionList(() => {
-        state.expandedEventId = state.expandedEventId === card.dataset.id ? null : card.dataset.id;
-      });
+      toggleEventDetail(card.dataset.id);
     };
     card.addEventListener("click", toggle);
     card.addEventListener("keydown", event => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); toggle(); } });
   });
+}
+
+function detailMarkup(event) {
+  const detailText = localizedDetail(event);
+  return `<div class="inline-detail ${event.photo ? "" : "no-photo"}">
+    ${event.photo ? `<img class="inline-photo" src="${escapeHtml(photoUrl(event.photo))}" alt="">` : ""}
+    <div class="inline-copy"><p class="inline-speaker">${escapeHtml(localized(event, "speaker_name"))}</p>${detailText ? `<p class="inline-bio">${escapeHtml(detailText)}</p>` : ""}</div>
+  </div>`;
+}
+
+async function toggleEventDetail(eventId) {
+  if (state.listTransitioning) return;
+  const event = state.events.find(item => item.event_id === eventId);
+  if (!event) return;
+  const currentId = state.expandedEventId;
+  if (currentId === eventId) {
+    await transitionEventWindow({ nextOffset: state.eventPage, nextExpandedId: null, direction: 1 });
+    return;
+  }
+
+  const events = eventsForSelectedDate();
+  const eventIndex = events.findIndex(item => item.event_id === eventId);
+  const visibleIndex = eventIndex - state.eventPage;
+  const visibleSlots = currentId ? DETAIL_WINDOW_SIZE : PAGE_SIZE;
+  const isBottomSlot = visibleIndex === visibleSlots - 1;
+  const nextOffset = isBottomSlot ? Math.min(events.length - 1, state.eventPage + 1) : state.eventPage;
+  const currentIndex = currentId ? events.findIndex(item => item.event_id === currentId) : -1;
+  const direction = isBottomSlot || (currentIndex >= 0 && eventIndex > currentIndex) ? 1 : -1;
+  await transitionEventWindow({ nextOffset, nextExpandedId: eventId, direction });
 }
 
 function bindPressFeedback(node) {
@@ -183,30 +249,29 @@ function renderEvents({ entering = false } = {}) {
   const windowed = visibleEventWindow(allEvents);
   const events = windowed.events;
   const list = el("schedule-list");
-  list.dataset.page = String(state.eventPage + 1);
-  list.dataset.pages = String(windowed.pageCount);
-  list.setAttribute("aria-label", windowed.pageCount > 1 ? `Страница ${state.eventPage + 1} из ${windowed.pageCount}` : "События выбранного дня");
+  const stack = el("event-stack");
+  list.dataset.position = String(state.eventPage + 1);
+  list.dataset.positions = String(windowed.maxOffset + 1);
+  list.setAttribute("aria-label", windowed.maxOffset > 0 ? `События ${windowed.start + 1}–${windowed.start + events.length} из ${allEvents.length}` : "События выбранного дня");
   el("empty-state").hidden = allEvents.length > 0;
-  list.innerHTML = events.map(event => {
+  stack.innerHTML = events.map((event, index) => {
     const status = eventStatus(event);
-    const interactive = state.config.detailsEnabled && event.detailEnabled !== false && Boolean(event.description || event.description_en || event.photo);
+    const detailText = localizedDetail(event);
+    const interactive = state.config.detailsEnabled && event.detailEnabled !== false && Boolean(detailText || event.photo);
     const expanded = interactive && state.expandedEventId === event.event_id;
-    return `<article class="event-card ${status.name} ${interactive ? "interactive" : ""} ${expanded ? "expanded" : ""}" data-id="${escapeHtml(event.event_id)}" ${interactive ? `tabindex="0" role="button" aria-expanded="${expanded}"` : ""}>
+    return `<article class="event-card ${status.name} ${interactive ? "interactive" : ""} ${expanded ? "expanded" : ""}" style="--card-index:${index}" data-id="${escapeHtml(event.event_id)}" ${interactive ? `tabindex="0" role="button" aria-expanded="${expanded}"` : ""}>
       <div class="event-body">
         <div class="event-left"><p class="event-type">${escapeHtml(localized(event, "event_type"))}</p><p class="event-time">${escapeHtml(event.start_time)}—${escapeHtml(event.end_time)}</p></div>
         <span class="event-divider"></span>
         <div class="event-right"><p class="event-speaker">${escapeHtml(localized(event, "speaker_name"))}</p><h2>${escapeHtml(localized(event, "title"))}</h2></div>
       </div>
-      ${expanded ? `<div class="inline-detail ${event.photo ? "" : "no-photo"}">
-        ${event.photo ? `<img class="inline-photo" src="${escapeHtml(photoUrl(event.photo))}" alt="">` : ""}
-        <div class="inline-copy"><p class="inline-speaker">${escapeHtml(localized(event, "speaker_name"))}</p>${localized(event, "speaker_bio") ? `<p class="inline-bio">${escapeHtml(localized(event, "speaker_bio"))}</p>` : ""}<p class="inline-description">${escapeHtml(localized(event, "description"))}</p></div>
-      </div>` : ""}
+      ${expanded ? detailMarkup(event) : ""}
       <div class="progress-track"><span style="width:${(status.progress * 100).toFixed(3)}%"></span></div>
       ${status.name === "now" ? `<div class="now-badge">${nowLabel()} <i></i></div>` : ""}
     </article>`;
   }).join("");
-  bindEventCards(list);
-  const cards = [...list.querySelectorAll(".event-card")];
+  bindEventCards(stack);
+  const cards = [...stack.querySelectorAll(".event-card")];
   cards.forEach((card, index) => {
     card.style.transitionDelay = `${Math.min(index, 6) * 38 + (index * 37 % 43)}ms`;
     if (entering) card.classList.add("is-hidden", "is-preparing");
@@ -216,8 +281,9 @@ function renderEvents({ entering = false } = {}) {
 async function transitionList(update) {
   if (state.listTransitioning) return;
   state.listTransitioning = true;
+  el("display").classList.add("is-scene-transitioning");
   const list = el("schedule-list");
-  const oldCards = [...list.querySelectorAll(".event-card")];
+  const oldCards = [...el("event-stack").querySelectorAll(".event-card")];
   oldCards.forEach((card, index) => {
     card.style.transitionDelay = `${Math.min(index, 6) * 16 + (index * 37 % 43)}ms`;
     card.classList.add("is-hidden");
@@ -226,22 +292,187 @@ async function transitionList(update) {
   update();
   renderEvents({ entering: true });
   await paint();
-  const newCards = [...list.querySelectorAll(".event-card")];
+  const newCards = [...el("event-stack").querySelectorAll(".event-card")];
   newCards.forEach(card => card.classList.remove("is-preparing", "is-hidden"));
   await wait(620);
   newCards.forEach(card => { card.style.transitionDelay = ""; });
+  el("display").classList.remove("is-scene-transitioning");
   state.listTransitioning = false;
+  flushPendingLanguage();
+}
+
+async function transitionEventWindow({ nextOffset, nextExpandedId = state.expandedEventId, direction = 1 }) {
+  if (state.listTransitioning) return;
+  const events = eventsForSelectedDate();
+  const windowSize = nextExpandedId ? DETAIL_WINDOW_SIZE : PAGE_SIZE;
+  const maxOffset = nextExpandedId ? Math.max(0, events.length - 1) : Math.max(0, events.length - windowSize);
+  nextOffset = Math.max(0, Math.min(maxOffset, nextOffset));
+  const oldExpandedId = state.expandedEventId;
+  const oldOffset = state.eventPage;
+  if (nextOffset === state.eventPage && nextExpandedId === oldExpandedId) return;
+  state.listTransitioning = true;
+  const display = el("display");
+  const switchingDetails = Boolean(oldExpandedId && nextExpandedId && oldExpandedId !== nextExpandedId);
+  const pagingOnly = oldExpandedId === nextExpandedId && nextOffset !== oldOffset;
+  display.classList.toggle("is-detail-switching", switchingDetails);
+  display.classList.toggle("is-wheel-paging", pagingOnly);
+  const viewport = el("event-stack").parentElement;
+  const viewportRect = viewport.getBoundingClientRect();
+  const oldCards = [...el("event-stack").querySelectorAll(".event-card")];
+  const eventIndexes = new Map(events.map((event, index) => [event.event_id, index]));
+  const oldEventIndexes = oldCards.map(card => eventIndexes.get(card.dataset.id)).filter(Number.isInteger);
+  const firstOldEventIndex = oldEventIndexes.length ? Math.min(...oldEventIndexes) : 0;
+  const lastOldEventIndex = oldEventIndexes.length ? Math.max(...oldEventIndexes) : -1;
+  const oldGeometry = new Map(oldCards.map(card => {
+    const rect = card.getBoundingClientRect();
+    return [card.dataset.id, { top: rect.top - viewportRect.top, height: rect.height, expanded: card.classList.contains("expanded") }];
+  }));
+
+  display.classList.add("is-scene-transitioning");
+  state.eventPage = nextOffset;
+  state.expandedEventId = nextExpandedId;
+  renderEvents();
+
+  const stack = el("event-stack");
+  const newCards = [...stack.querySelectorAll(".event-card")];
+  const newIds = new Set(newCards.map(card => card.dataset.id));
+  const newEventIndexes = newCards.map(card => eventIndexes.get(card.dataset.id)).filter(Number.isInteger);
+  const firstNewEventIndex = newEventIndexes.length ? Math.min(...newEventIndexes) : 0;
+  const transientDetails = [];
+  const ghosts = oldCards.filter(card => !newIds.has(card.dataset.id)).map(exiting => {
+    const geometry = oldGeometry.get(exiting.dataset.id);
+    const oldIndex = oldCards.indexOf(exiting);
+    const exitingEventIndex = eventIndexes.get(exiting.dataset.id);
+    const exitDirection = exitingEventIndex < firstNewEventIndex ? 1 : -1;
+    const motionIndex = exitDirection > 0 ? oldIndex : oldCards.length - 1 - oldIndex;
+    const ghost = exiting.cloneNode(true);
+    ghost.classList.remove("is-pressed", "is-overlay", "is-preparing", "wheel-card", "is-entering");
+    ghost.classList.add("wheel-ghost");
+    ghost.removeAttribute("tabindex");
+    ghost.removeAttribute("role");
+    ghost.removeAttribute("aria-expanded");
+    ghost.style.top = `${geometry.top}px`;
+    ghost.style.height = `${geometry.height}px`;
+    ghost.style.setProperty("--wheel-exit-tilt", "0deg");
+    ghost.style.transitionDelay = `${Math.min(motionIndex, 6) * 34}ms`;
+    viewport.append(ghost);
+    return { node: ghost, geometry, exitDirection };
+  });
+
+  newCards.forEach((card, index) => {
+    const rect = card.getBoundingClientRect();
+    const old = oldGeometry.get(card.dataset.id);
+    const cardEventIndex = eventIndexes.get(card.dataset.id);
+    const entryDirection = cardEventIndex < firstOldEventIndex ? -1 : cardEventIndex > lastOldEventIndex ? 1 : direction;
+    const enteringFrom = entryDirection > 0 ? viewportRect.height - rect.height : 0;
+    const startY = old ? old.top - (rect.top - viewportRect.top) : enteringFrom - (rect.top - viewportRect.top);
+    const cardDirection = old ? (startY >= 0 ? 1 : -1) : entryDirection;
+    const cardTilt = old && Math.abs(startY) < .5 ? 0 : cardDirection > 0 ? -.8 : .8;
+    card.classList.add("wheel-card", "is-preparing");
+    if (!old) card.classList.add("is-entering");
+    if (old && old.height !== rect.height) card.style.height = `${old.height}px`;
+    if (card.dataset.id === nextExpandedId && oldExpandedId !== nextExpandedId) card.querySelector(".inline-detail")?.classList.add("detail-entering");
+    if (old?.expanded && card.dataset.id === oldExpandedId && nextExpandedId !== oldExpandedId) {
+      const oldDetail = oldCards.find(item => item.dataset.id === card.dataset.id)?.querySelector(".inline-detail");
+      if (oldDetail) {
+        const leavingDetail = oldDetail.cloneNode(true);
+        leavingDetail.classList.add("detail-leaving");
+        card.append(leavingDetail);
+        transientDetails.push(leavingDetail);
+      }
+    }
+    card.style.setProperty("--wheel-from", `${startY}px`);
+    card.style.setProperty("--wheel-tilt", `${cardTilt}deg`);
+    const motionIndex = cardDirection > 0 ? index : newCards.length - 1 - index;
+    const transitionDelay = pagingOnly ? 480 + Math.min(motionIndex, 6) * 12 : Math.min(motionIndex, 6) * 34;
+    card.style.transitionDelay = `${transitionDelay}ms`;
+  });
+
+  await paint();
+  newCards.forEach(card => {
+    card.classList.remove("is-preparing");
+    card.style.removeProperty("height");
+  });
+  ghosts.forEach(({ node }) => {
+    node.style.setProperty("--wheel-exit", "0px");
+    node.classList.add("is-leaving");
+  });
+
+  await wait(pagingOnly ? 2600 : switchingDetails ? 820 : 1180);
+  ghosts.forEach(({ node }) => node.remove());
+  transientDetails.forEach(node => node.remove());
+  newCards.forEach(card => {
+    card.classList.remove("wheel-card", "is-entering");
+    card.style.removeProperty("--wheel-from");
+    card.style.removeProperty("--wheel-tilt");
+    card.style.transitionDelay = "";
+  });
+  display.classList.remove("is-scene-transitioning");
+  display.classList.remove("is-detail-switching");
+  display.classList.remove("is-wheel-paging");
+  state.listTransitioning = false;
+  flushPendingLanguage();
+}
+
+async function transitionEventWheel(delta) {
+  if (state.listTransitioning) return;
+  const events = eventsForSelectedDate();
+  const windowSize = state.expandedEventId ? DETAIL_WINDOW_SIZE : PAGE_SIZE;
+  const maxOffset = Math.max(0, events.length - windowSize);
+  const nextOffset = Math.max(0, Math.min(maxOffset, state.eventPage + delta));
+  await transitionEventWindow({ nextOffset, nextExpandedId: state.expandedEventId, direction: delta });
+}
+
+async function transitionLanguage(nextLanguage) {
+  if (state.listTransitioning || nextLanguage === state.language) return;
+  state.language = nextLanguage;
+  updateLanguage();
+  updateLocalizedContent();
+}
+
+function requestLanguage(nextLanguage) {
+  if (!["ru", "en"].includes(nextLanguage)) return;
+  if (nextLanguage === state.language) {
+    state.pendingLanguage = null;
+    return;
+  }
+  state.pendingLanguage = nextLanguage;
+  flushPendingLanguage();
+}
+
+function flushPendingLanguage() {
+  if (state.listTransitioning || !state.pendingLanguage) return;
+  const nextLanguage = state.pendingLanguage;
+  state.pendingLanguage = null;
+  if (nextLanguage !== state.language) void transitionLanguage(nextLanguage);
+}
+
+function updateLocalizedContent() {
+  el("date-nav").querySelectorAll("[data-date]").forEach(button => {
+    const event = state.events.find(item => item.date === button.dataset.date);
+    button.textContent = formatDate(button.dataset.date, localized(event, "date_label"));
+  });
+  el("schedule-list").querySelectorAll(".event-card").forEach(card => {
+    const event = state.events.find(item => item.event_id === card.dataset.id);
+    if (!event) return;
+    card.querySelector(".event-type").textContent = localized(event, "event_type");
+    card.querySelector(".event-speaker").textContent = localized(event, "speaker_name");
+    card.querySelector(".event-right h2").textContent = localized(event, "title");
+    const detailSpeaker = card.querySelector(".inline-speaker");
+    const detailBio = card.querySelector(".inline-bio");
+    if (detailSpeaker) detailSpeaker.textContent = localized(event, "speaker_name");
+    if (detailBio) detailBio.textContent = localizedDetail(event);
+    const badge = card.querySelector(".now-badge");
+    if (badge) badge.innerHTML = `${nowLabel()} <i></i>`;
+  });
 }
 
 function changeEventPage(delta) {
-  if (state.expandedEventId || state.listTransitioning) return;
-  const pageCount = Math.ceil(eventsForSelectedDate().length / PAGE_SIZE);
-  const next = Math.max(0, Math.min(pageCount - 1, state.eventPage + delta));
-  if (next === state.eventPage) return;
-  transitionList(() => { state.eventPage = next; });
+  transitionEventWheel(delta < 0 ? -1 : 1);
 }
 
 function renderStatuses() {
+  if (state.listTransitioning) return;
   el("schedule-list")?.querySelectorAll(".event-card").forEach(card => {
     const event = state.events.find(item => item.event_id === card.dataset.id);
     if (!event) return;
@@ -252,12 +483,17 @@ function renderStatuses() {
     if (status.name === "now" && !badge) card.insertAdjacentHTML("beforeend", `<div class="now-badge">${nowLabel()} <i></i></div>`);
     if (status.name !== "now") badge?.remove();
   });
-  if (!state.expandedEventId && !state.listTransitioning) {
-    const events = eventsForSelectedDate();
-    const nowIndex = events.findIndex(event => eventStatus(event).name === "now");
-    const nowPage = nowIndex >= 0 ? Math.floor(nowIndex / PAGE_SIZE) : state.eventPage;
-    if (nowPage !== state.eventPage) transitionList(() => { state.eventPage = nowPage; });
+}
+
+function animateLiveProgress() {
+  if (!document.hidden && !state.listTransitioning) {
+    el("schedule-list")?.querySelectorAll(".event-card.now").forEach(card => {
+      const event = state.events.find(item => item.event_id === card.dataset.id);
+      const progress = card.querySelector(".progress-track span");
+      if (event && progress) progress.style.width = `${(eventStatus(event).progress * 100).toFixed(3)}%`;
+    });
   }
+  state.progressFrame = requestAnimationFrame(animateLiveProgress);
 }
 
 function photoUrl(value) {
@@ -265,12 +501,20 @@ function photoUrl(value) {
   return `content/${value.replace(/^\/+/, "")}`;
 }
 
+function updateBrandLogo() {
+  const profile = state.config.profile === "forum" ? "forum" : "business";
+  const logo = profile === "business"
+    ? "logo-business.svg"
+    : state.language === "en" ? "logo-eng-row.svg" : "logo-full.svg";
+  el("brand-logo").src = `public/assets/logos/${logo}`;
+  el("brand-logo").alt = profile === "business" ? "Билайн бизнес" : state.language === "en" ? "Beeline" : "Билайн";
+}
+
 function applyConfig() {
   const profile = state.config.profile === "forum" ? "forum" : "business";
   el("display").dataset.profile = profile;
   el("display").classList.toggle("patterns-on", state.config.patternsEnabled);
-  const headerLogo = profile === "forum" ? "logo-full.svg" : "logo-business.svg";
-  el("brand-logo").src = `public/assets/logos/${headerLogo}`;
+  updateBrandLogo();
   el("screen-title").textContent = localized(state.config, "title") || "ии лекторий";
   el("schedule-select").innerHTML = Object.entries(state.config.schedules).map(([id, schedule]) => `<option value="${escapeHtml(id)}">${escapeHtml(localized(schedule, "name") || id)}</option>`).join("");
   el("schedule-select").value = state.config.schedule;
@@ -283,9 +527,10 @@ function applyConfig() {
 }
 
 function bindUi() {
+  document.addEventListener("visibilitychange", () => el("display").classList.toggle("is-page-hidden", document.hidden));
   document.addEventListener("keydown", event => {
     if (devToolsEnabled && event.shiftKey && event.key.toLowerCase() === "d") el("dev-panel").hidden = !el("dev-panel").hidden;
-    if (event.key === "Escape" && state.expandedEventId) transitionList(() => { state.expandedEventId = null; });
+    if (event.key === "Escape" && state.expandedEventId) toggleEventDetail(state.expandedEventId);
     if (event.key === "PageDown") { event.preventDefault(); changeEventPage(1); }
     if (event.key === "PageUp") { event.preventDefault(); changeEventPage(-1); }
   });
@@ -302,12 +547,7 @@ function bindUi() {
   document.querySelectorAll("[data-language]").forEach(button => {
     bindPressFeedback(button);
     button.onclick = () => {
-      if (button.dataset.language === state.language) return;
-      transitionList(() => {
-        state.language = button.dataset.language;
-        updateLanguage();
-        renderDates();
-      });
+      requestLanguage(button.dataset.language);
     };
   });
   const list = el("schedule-list");
@@ -332,6 +572,7 @@ function bindUi() {
 
 function updateLanguage() {
   document.documentElement.lang = state.language;
+  updateBrandLogo();
   el("empty-state").textContent = state.language === "en" ? "No events on this date" : "На выбранную дату событий нет";
   document.querySelectorAll("[data-language]").forEach(button => button.classList.toggle("active", button.dataset.language === state.language));
   if (state.config) {
