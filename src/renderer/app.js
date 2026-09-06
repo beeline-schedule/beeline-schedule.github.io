@@ -1,9 +1,9 @@
 import { parseCsv, validateAndNormalize } from "./csv.js";
 
-const state = { config: null, catalog: null, events: [], selectedDate: null, timer: null, progressFrame: null, dateScrollFrame: null, language: "ru", pendingLanguage: null, expandedEventId: null, eventPage: 0, listTransitioning: false, swipeStartY: null, suppressClick: false };
+const state = { config: null, catalog: null, events: [], selectedDate: null, pendingDate: null, timer: null, progressFrame: null, dateScrollFrame: null, language: "ru", pendingLanguage: null, expandedEventId: null, eventPage: 0, listTransitioning: false, swipeStartY: null, suppressClick: false };
 const el = id => document.getElementById(id);
 const devToolsEnabled = ["127.0.0.1", "localhost"].includes(location.hostname) || new URLSearchParams(location.search).get("dev") === "1";
-const PAGE_SIZE = 7;
+const PAGE_SIZE = 8;
 const DETAIL_WINDOW_SIZE = 6;
 const wait = milliseconds => new Promise(resolve => window.setTimeout(resolve, milliseconds));
 const paint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -124,15 +124,7 @@ function renderDates({ smooth = false } = {}) {
     if (button.dataset.bound === "true") return;
     button.dataset.bound = "true";
     bindPressFeedback(button);
-    button.addEventListener("click", () => {
-      if (button.dataset.date === state.selectedDate) return;
-      transitionList(() => {
-        state.selectedDate = button.dataset.date;
-        state.expandedEventId = null;
-        state.eventPage = initialEventPage();
-        renderDates({ smooth: true });
-      });
-    });
+    button.addEventListener("click", () => requestDate(button.dataset.date));
   });
   centerActiveDate(smooth);
 }
@@ -142,7 +134,8 @@ function centerActiveDate(smooth = false) {
   const buttons = [...nav.querySelectorAll("button")];
   const gap = Number.parseFloat(getComputedStyle(nav).columnGap) || 0;
   const contentWidth = buttons.reduce((total, button) => total + button.offsetWidth, 0) + Math.max(0, buttons.length - 1) * gap;
-  const allFit = contentWidth <= nav.clientWidth;
+  const isFourDayForum = state.config.profile === "forum" && buttons.length === 4;
+  const allFit = isFourDayForum ? state.language === "ru" : contentWidth <= nav.clientWidth;
   nav.classList.toggle("all-fit", allFit);
   window.cancelAnimationFrame(state.dateScrollFrame);
   if (allFit) {
@@ -219,11 +212,10 @@ async function toggleEventDetail(eventId) {
   const events = eventsForSelectedDate();
   const eventIndex = events.findIndex(item => item.event_id === eventId);
   const visibleIndex = eventIndex - state.eventPage;
-  const visibleSlots = currentId ? DETAIL_WINDOW_SIZE : PAGE_SIZE;
-  const isBottomSlot = visibleIndex === visibleSlots - 1;
-  const nextOffset = isBottomSlot ? Math.min(events.length - 1, state.eventPage + 1) : state.eventPage;
+  const detailShift = Math.max(0, visibleIndex - (DETAIL_WINDOW_SIZE - 1));
+  const nextOffset = Math.min(events.length - 1, state.eventPage + detailShift);
   const currentIndex = currentId ? events.findIndex(item => item.event_id === currentId) : -1;
-  const direction = isBottomSlot || (currentIndex >= 0 && eventIndex > currentIndex) ? 1 : -1;
+  const direction = detailShift > 0 || (currentIndex >= 0 && eventIndex > currentIndex) ? 1 : -1;
   await transitionEventWindow({ nextOffset, nextExpandedId: eventId, direction });
 }
 
@@ -242,6 +234,11 @@ function bindPressFeedback(node) {
   node.addEventListener("pointerup", release);
   node.addEventListener("pointercancel", release);
   node.addEventListener("pointerleave", release);
+}
+
+function progressGradient(value) {
+  const percent = `${(Math.max(0, Math.min(1, value)) * 100).toFixed(3)}%`;
+  return `linear-gradient(to right, #fff 0%, #fff ${percent}, #3b3b3b ${percent}, #3b3b3b 100%)`;
 }
 
 function renderEvents({ entering = false } = {}) {
@@ -266,13 +263,15 @@ function renderEvents({ entering = false } = {}) {
         <div class="event-right"><p class="event-speaker">${escapeHtml(localized(event, "speaker_name"))}</p><h2>${escapeHtml(localized(event, "title"))}</h2></div>
       </div>
       ${expanded ? detailMarkup(event) : ""}
-      <div class="progress-track"><span style="width:${(status.progress * 100).toFixed(3)}%"></span></div>
+      <div class="progress-track"></div>
       ${status.name === "now" ? `<div class="now-badge">${nowLabel()} <i></i></div>` : ""}
     </article>`;
   }).join("");
   bindEventCards(stack);
   const cards = [...stack.querySelectorAll(".event-card")];
   cards.forEach((card, index) => {
+    const track = card.querySelector(".progress-track");
+    track.style.backgroundImage = progressGradient(eventStatus(events[index]).progress);
     card.style.transitionDelay = `${Math.min(index, 6) * 38 + (index * 37 % 43)}ms`;
     if (entering) card.classList.add("is-hidden", "is-preparing");
   });
@@ -285,20 +284,45 @@ async function transitionList(update) {
   const list = el("schedule-list");
   const oldCards = [...el("event-stack").querySelectorAll(".event-card")];
   oldCards.forEach((card, index) => {
-    card.style.transitionDelay = `${Math.min(index, 6) * 16 + (index * 37 % 43)}ms`;
+    card.style.transitionDelay = `${Math.min(index, 7) * 12 + (index * 17 % 23)}ms`;
     card.classList.add("is-hidden");
   });
-  await wait(360);
+  await wait(460);
   update();
   renderEvents({ entering: true });
   await paint();
   const newCards = [...el("event-stack").querySelectorAll(".event-card")];
+  newCards.forEach((card, index) => { card.style.transitionDelay = `${Math.min(index, 7) * 18}ms`; });
   newCards.forEach(card => card.classList.remove("is-preparing", "is-hidden"));
-  await wait(620);
+  await wait(520);
   newCards.forEach(card => { card.style.transitionDelay = ""; });
   el("display").classList.remove("is-scene-transitioning");
   state.listTransitioning = false;
+  flushPendingDate();
   flushPendingLanguage();
+}
+
+function requestDate(nextDate) {
+  if (!availableDates().includes(nextDate)) return;
+  if (nextDate === state.selectedDate && !state.listTransitioning) {
+    state.pendingDate = null;
+    return;
+  }
+  state.pendingDate = nextDate;
+  flushPendingDate();
+}
+
+function flushPendingDate() {
+  if (state.listTransitioning || !state.pendingDate) return;
+  const nextDate = state.pendingDate;
+  state.pendingDate = null;
+  if (nextDate === state.selectedDate) return;
+  void transitionList(() => {
+    state.selectedDate = nextDate;
+    state.expandedEventId = null;
+    state.eventPage = initialEventPage();
+    renderDates({ smooth: true });
+  });
 }
 
 async function transitionEventWindow({ nextOffset, nextExpandedId = state.expandedEventId, direction = 1 }) {
@@ -353,7 +377,7 @@ async function transitionEventWindow({ nextOffset, nextExpandedId = state.expand
     ghost.removeAttribute("aria-expanded");
     ghost.style.top = `${geometry.top}px`;
     ghost.style.height = `${geometry.height}px`;
-    ghost.style.setProperty("--wheel-exit-tilt", "0deg");
+    ghost.style.setProperty("--wheel-exit-tilt", `${exitDirection > 0 ? .5 : -.5}deg`);
     ghost.style.transitionDelay = `${Math.min(motionIndex, 6) * 34}ms`;
     viewport.append(ghost);
     return { node: ghost, geometry, exitDirection };
@@ -364,10 +388,10 @@ async function transitionEventWindow({ nextOffset, nextExpandedId = state.expand
     const old = oldGeometry.get(card.dataset.id);
     const cardEventIndex = eventIndexes.get(card.dataset.id);
     const entryDirection = cardEventIndex < firstOldEventIndex ? -1 : cardEventIndex > lastOldEventIndex ? 1 : direction;
-    const enteringFrom = entryDirection > 0 ? viewportRect.height - rect.height : 0;
-    const startY = old ? old.top - (rect.top - viewportRect.top) : enteringFrom - (rect.top - viewportRect.top);
+    const finalTop = rect.top - viewportRect.top;
+    const startY = old ? old.top - finalTop : 0;
     const cardDirection = old ? (startY >= 0 ? 1 : -1) : entryDirection;
-    const cardTilt = old && Math.abs(startY) < .5 ? 0 : cardDirection > 0 ? -.8 : .8;
+    const cardTilt = Math.abs(startY) < .5 ? 0 : cardDirection > 0 ? -.8 : .8;
     card.classList.add("wheel-card", "is-preparing");
     if (!old) card.classList.add("is-entering");
     if (old && old.height !== rect.height) card.style.height = `${old.height}px`;
@@ -384,8 +408,9 @@ async function transitionEventWindow({ nextOffset, nextExpandedId = state.expand
     card.style.setProperty("--wheel-from", `${startY}px`);
     card.style.setProperty("--wheel-tilt", `${cardTilt}deg`);
     const motionIndex = cardDirection > 0 ? index : newCards.length - 1 - index;
-    const transitionDelay = pagingOnly ? 480 + Math.min(motionIndex, 6) * 12 : Math.min(motionIndex, 6) * 34;
-    card.style.transitionDelay = `${transitionDelay}ms`;
+    const staggerDelay = Math.min(motionIndex, 6) * 34;
+    const entryDelay = pagingOnly && !old ? 1500 : 0;
+    card.style.transitionDelay = `${staggerDelay + entryDelay}ms`;
   });
 
   await paint();
@@ -393,12 +418,13 @@ async function transitionEventWindow({ nextOffset, nextExpandedId = state.expand
     card.classList.remove("is-preparing");
     card.style.removeProperty("height");
   });
-  ghosts.forEach(({ node }) => {
-    node.style.setProperty("--wheel-exit", "0px");
+  ghosts.forEach(({ node, geometry, exitDirection }) => {
+    const safeTravel = Math.min(geometry.height * .3, viewportRect.height * .035);
+    node.style.setProperty("--wheel-exit", `${exitDirection > 0 ? -safeTravel : safeTravel}px`);
     node.classList.add("is-leaving");
   });
 
-  await wait(pagingOnly ? 2600 : switchingDetails ? 820 : 1180);
+  await wait(pagingOnly ? 2750 : switchingDetails ? 820 : 1180);
   ghosts.forEach(({ node }) => node.remove());
   transientDetails.forEach(node => node.remove());
   newCards.forEach(card => {
@@ -417,10 +443,9 @@ async function transitionEventWindow({ nextOffset, nextExpandedId = state.expand
 async function transitionEventWheel(delta) {
   if (state.listTransitioning) return;
   const events = eventsForSelectedDate();
-  const windowSize = state.expandedEventId ? DETAIL_WINDOW_SIZE : PAGE_SIZE;
-  const maxOffset = Math.max(0, events.length - windowSize);
+  const maxOffset = Math.max(0, events.length - PAGE_SIZE);
   const nextOffset = Math.max(0, Math.min(maxOffset, state.eventPage + delta));
-  await transitionEventWindow({ nextOffset, nextExpandedId: state.expandedEventId, direction: delta });
+  await transitionEventWindow({ nextOffset, nextExpandedId: null, direction: delta });
 }
 
 async function transitionLanguage(nextLanguage) {
@@ -465,6 +490,7 @@ function updateLocalizedContent() {
     const badge = card.querySelector(".now-badge");
     if (badge) badge.innerHTML = `${nowLabel()} <i></i>`;
   });
+  centerActiveDate(false);
 }
 
 function changeEventPage(delta) {
@@ -478,7 +504,7 @@ function renderStatuses() {
     if (!event) return;
     const status = eventStatus(event);
     card.classList.remove("past", "now", "upcoming"); card.classList.add(status.name);
-    card.querySelector(".progress-track span").style.width = `${(status.progress * 100).toFixed(3)}%`;
+    card.querySelector(".progress-track").style.backgroundImage = progressGradient(status.progress);
     const badge = card.querySelector(".now-badge");
     if (status.name === "now" && !badge) card.insertAdjacentHTML("beforeend", `<div class="now-badge">${nowLabel()} <i></i></div>`);
     if (status.name !== "now") badge?.remove();
@@ -489,8 +515,8 @@ function animateLiveProgress() {
   if (!document.hidden && !state.listTransitioning) {
     el("schedule-list")?.querySelectorAll(".event-card.now").forEach(card => {
       const event = state.events.find(item => item.event_id === card.dataset.id);
-      const progress = card.querySelector(".progress-track span");
-      if (event && progress) progress.style.width = `${(eventStatus(event).progress * 100).toFixed(3)}%`;
+      const progress = card.querySelector(".progress-track");
+      if (event && progress) progress.style.backgroundImage = progressGradient(eventStatus(event).progress);
     });
   }
   state.progressFrame = requestAnimationFrame(animateLiveProgress);
@@ -515,7 +541,7 @@ function applyConfig() {
   el("display").dataset.profile = profile;
   el("display").classList.toggle("patterns-on", state.config.patternsEnabled);
   updateBrandLogo();
-  el("screen-title").textContent = localized(state.config, "title") || "ии лекторий";
+  el("screen-title").textContent = state.config.title || "ии лекторий";
   el("schedule-select").innerHTML = Object.entries(state.config.schedules).map(([id, schedule]) => `<option value="${escapeHtml(id)}">${escapeHtml(localized(schedule, "name") || id)}</option>`).join("");
   el("schedule-select").value = state.config.schedule;
   el("clock-mode").value = state.config.clock.mode;
@@ -576,7 +602,7 @@ function updateLanguage() {
   el("empty-state").textContent = state.language === "en" ? "No events on this date" : "На выбранную дату событий нет";
   document.querySelectorAll("[data-language]").forEach(button => button.classList.toggle("active", button.dataset.language === state.language));
   if (state.config) {
-    el("screen-title").textContent = localized(state.config, "title") || "ии лекторий";
+    el("screen-title").textContent = state.config.title || "ии лекторий";
     el("schedule-select").innerHTML = Object.entries(state.config.schedules).map(([id, schedule]) => `<option value="${escapeHtml(id)}">${escapeHtml(localized(schedule, "name") || id)}</option>`).join("");
     el("schedule-select").value = state.config.schedule;
   }
