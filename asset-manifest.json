@@ -1,0 +1,68 @@
+{
+  "mode": "draft",
+  "assets": [
+    {
+      "id": "business.svg",
+      "source": "logos/beeline/business/logo-bussines.svg",
+      "state": "ready",
+      "bytes": 6669,
+      "sha256": "b7a9ceaf5524ae9f4b7b3394142b4a01e5eb659b417832bf98894251cd8be260"
+    },
+    {
+      "id": "beeline.svg",
+      "source": "logos/beeline/basic/logo_full.svg",
+      "state": "ready",
+      "bytes": 4190,
+      "sha256": "6e07b877d6a4d09a3b5fef97d1e3d9918e9033b00c3bcdec594d37f5e35465e1"
+    },
+    {
+      "id": "festival.svg",
+      "source": "logos/forum/logo-forum.svg",
+      "state": "ready",
+      "bytes": 27976,
+      "sha256": "15a7ad5dee631038a1a30b5e6b7c36f36250a2c7b4261928f4412cc0f1de2391"
+    },
+    {
+      "id": "pattern-business.svg",
+      "source": "patterns/schedule-business.svg",
+      "state": "ready",
+      "bytes": 53939,
+      "sha256": "2ca0eb724c50276ec6228c99158569c40a9074c85533a5b09c815c4dd45d8d2e"
+    },
+    {
+      "id": "pattern-festival.svg",
+      "source": "patterns/schedule-festival.svg",
+      "state": "ready",
+      "bytes": 53931,
+      "sha256": "e544c24bab45aea778b01241e15474dd7c8d33fc8a05e24ca32f912bb66a73af"
+    },
+    {
+      "id": "platform-regular.otf",
+      "source": "fonts/PlatformLC desktop fin/PlatformLC-Regular.otf",
+      "state": "ready",
+      "bytes": 142628,
+      "sha256": "67cf95dfdde562e9f1a762181f56ae57cbeb7a93f4c214a09376244aba6cb392"
+    },
+    {
+      "id": "platform-medium.otf",
+      "source": "fonts/PlatformLC desktop fin/PlatformLC-Medium.otf",
+      "state": "ready",
+      "bytes": 141584,
+      "sha256": "76060d0530bdef3766583ddf901cef9af313c2ed2e29ed6079f193c4c2b77348"
+    },
+    {
+      "id": "platform-bold.otf",
+      "source": "fonts/PlatformLC desktop fin/PlatformLC-Bold.otf",
+      "state": "ready",
+      "bytes": 135376,
+      "sha256": "e84fe92f06fd33b54ffdfd80a6ceca0ec1460decbaac7b3e1ef747479b4a39b3"
+    }
+  ],
+  "missing": [
+    {
+      "id": "favicon",
+      "state": "missing",
+      "reason": "No approved web icon"
+    }
+  ]
+}
