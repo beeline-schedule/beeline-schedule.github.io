@@ -56,6 +56,20 @@
       "state": "ready",
       "bytes": 135376,
       "sha256": "e84fe92f06fd33b54ffdfd80a6ceca0ec1460decbaac7b3e1ef747479b4a39b3"
+    },
+    {
+      "id": "arsen-sedirov.jpg",
+      "source": "speakers/arsen-sedirov.jpg",
+      "state": "ready",
+      "bytes": 170103,
+      "sha256": "33352a048cf740eaff3569a032cddc92c4451bedc371f229183f01e40feef696"
+    },
+    {
+      "id": "location.svg",
+      "source": "icons/location.svg",
+      "state": "ready",
+      "bytes": 1308,
+      "sha256": "27a4232e3288f969175c086d897bf40211cd0105be7294f260b33a9ed620993e"
     }
   ],
   "missing": [
@@ -63,6 +77,21 @@
       "id": "favicon",
       "state": "missing",
       "reason": "No approved web icon"
+    },
+    {
+      "id": "portrait-tatyana-gordeeva",
+      "state": "missing",
+      "reason": "Biography portrait: original file absent at the master-table path"
+    },
+    {
+      "id": "portrait-alexander-sheiko",
+      "state": "missing",
+      "reason": "Biography portrait: original file absent at the master-table path"
+    },
+    {
+      "id": "portrait-ekaterina-busygina",
+      "state": "missing",
+      "reason": "Biography portrait: original file absent at the master-table path"
     }
   ]
 }
